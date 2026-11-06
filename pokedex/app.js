@@ -19,6 +19,7 @@ const state = {
   data: null, byId: new Map(), keys: [], last: null, flavorIdx: 0,
   settings: { voice: '', preset: 'robot', beeps: true, quizGen: '1', kidHeight: '110' },
   favs: [],
+  learned: {},
 };
 
 /* ---------------------------------------------------------------- Speicher */
@@ -290,54 +291,111 @@ const STOP = new Set(('wer wie was wo wann warum wieso welche welcher welches is
   + 'sich nicht nein ja gut schon viel dass wenn alle aller kommt koennen sein seine sehr so wo wohin woher hier da '
   + 'staerkste staerkstes beste bestes liebste toll cool super danke okay ok oh aeh aehm hm hmm man').split(' '));
 
+// Schreibt ein (bereits normalisiertes) Wort so um, wie es klingt – damit englisch
+// verstandene Wörter deutschen Namen ähneln: "sherlock" ≈ "schillok", "tooltalk" ≈ "turtok".
+function soundNorm(w) {
+  return w
+    .replace(/sch/g, 'S').replace(/sh/g, 'S').replace(/ch/g, 'C').replace(/s(?=[ptk])/g, 's')
+    .replace(/ph/g, 'f').replace(/th/g, 't').replace(/ck/g, 'k').replace(/qu/g, 'kw')
+    .replace(/c(?=[aoukl r])/g, 'k').replace(/c(?=[ei])/g, 'ts').replace(/c$/, 'k')
+    .replace(/alk/g, 'ok').replace(/aw/g, 'o').replace(/oo/g, 'u').replace(/ou/g, 'u')
+    .replace(/ee/g, 'i').replace(/ea/g, 'i').replace(/ie/g, 'i').replace(/y/g, 'i')
+    .replace(/ae/g, 'e').replace(/oe/g, 'o').replace(/ue/g, 'u')
+    .replace(/tz/g, 'ts').replace(/z/g, 'ts').replace(/x/g, 'ks').replace(/v/g, 'f').replace(/w/g, 'v')
+    .replace(/dt/g, 't').replace(/d$/, 't').replace(/g$/, 'k').replace(/h(?![aeiou])/g, '')
+    .replace(/[aeiou]r(?=[^aeiou])/g, m => m[0])   // "r" vor Konsonant hört man kaum
+    .replace(/(.)\1+/g, '$1');                       // doppelte Buchstaben
+}
+
 function buildIndex() {
   state.keys = [];
   for (const p of state.data.pokemon) {
     for (const name of new Set([p.n, p.en])) {
       if (!name) continue;
       const k = norm(name);
-      state.keys.push({ k, ph: koeln(name), p });
+      state.keys.push({ k, sk: soundNorm(k), ph: koeln(name), p, en: name !== p.n });
     }
   }
 }
-function scoreWindow(w) {
-  let best = null;
-  const ph = koeln(w);
+const similarity = (a, b) => 1 - lev(a, b) / Math.max(a.length, b.length);
+
+// Bewertet ein Wort(-paar) gegen alle Namen. Mit topN > 1 kommen mehrere Vorschläge zurück.
+function scoreWindow(w, topN = 1) {
+  const learned = state.learned && state.learned[w];
+  if (learned && state.byId.has(learned)) return [{ s: 1, p: state.byId.get(learned) }];
+  const ph = koeln(w), sw = soundNorm(w);
+  const res = [];
   for (const e of state.keys) {
-    if (Math.abs(e.k.length - w.length) > 3) continue;
+    if (Math.abs(e.k.length - w.length) > 4 && Math.abs(e.sk.length - sw.length) > 3) continue;
     let s;
     if (e.k === w) s = 1;
     else {
-      s = 1 - lev(w, e.k) / Math.max(w.length, e.k.length);
+      s = similarity(w, e.k);
+      if (sw.length >= 3) s = Math.max(s, similarity(sw, e.sk) - 0.04);
       if (w.length >= 5 && ph && ph === e.ph) s = Math.max(s, 0.84);
+      if (e.en) s -= 0.05;   // deutsche Namen bevorzugen
     }
-    if (!best || s > best.s) best = { s, p: e.p };
+    res.push({ s, p: e.p });
   }
-  return best;
+  res.sort((a, b) => b.s - a.s);
+  const out = [];
+  for (const r of res) {
+    if (!out.some(o => o.p === r.p)) out.push(r);
+    if (out.length >= topN) break;
+  }
+  return out;
+}
+function windowsOf(text) {
+  const tokens = text.replace(/\bmister\b/gi, 'mr').split(/\s+/).map(norm).filter(t => t && !STOP.has(t));
+  const wins = [];
+  for (let i = 0; i < tokens.length; i++) {
+    for (let len = 1; len <= 3 && i + len <= tokens.length; len++) {
+      const w = tokens.slice(i, i + len).join('');
+      if (w.length >= 3) wins.push({ w, i, end: i + len, len });
+    }
+  }
+  return wins;
 }
 // Findet bis zu zwei Pokémon in einem Satz (für Vergleiche "Glurak gegen Turtok").
 function findPokemon(text) {
   const nr = text.match(/nummer\s*(\d{1,4})/i);
   if (nr && state.byId.has(+nr[1])) return [state.byId.get(+nr[1])];
-  const tokens = text.replace(/\bmister\b/gi, 'mr').split(/\s+/).map(norm).filter(t => t && !STOP.has(t));
   const cands = [];
-  for (let i = 0; i < tokens.length; i++) {
-    for (let len = 1; len <= 3 && i + len <= tokens.length; len++) {
-      const w = tokens.slice(i, i + len).join('');
-      if (w.length < 3) continue;
-      const r = scoreWindow(w);
-      if (r && r.s >= 0.72) cands.push({ ...r, i, end: i + len, len });
-    }
+  for (const win of windowsOf(text)) {
+    const [r] = scoreWindow(win.w);
+    if (r && r.s >= 0.72) cands.push({ ...r, ...win, rank: r.s + 0.05 * (win.len - 1) });
   }
-  cands.sort((a, b) => b.s - a.s || b.len - a.len);
+  cands.sort((a, b) => b.rank - a.rank || b.len - a.len);
   const picked = [];
   for (const c of cands) {
     if (picked.some(x => x.p === c.p || (c.i < x.end && x.i < c.end))) continue;
-    if (picked.length && c.s < 0.8) continue;
+    if (picked.length && c.s < 0.74) continue;
     picked.push(c);
     if (picked.length === 2) break;
   }
-  return picked.sort((a, b) => a.i - b.i).map(c => c.p);
+  findPokemon.details = picked;
+  return picked.map(c => c.p);
+}
+// Vorschläge, wenn nichts sicher erkannt wurde: [{p, w}] – w = gehörtes Wort (zum Lernen)
+function suggestPokemon(texts) {
+  const all = [];
+  for (const t of texts) {
+    for (const win of windowsOf(t)) {
+      for (const r of scoreWindow(win.w, 3)) if (r.s >= 0.5) all.push({ ...r, w: win.w });
+    }
+  }
+  all.sort((a, b) => b.s - a.s);
+  const out = [];
+  for (const c of all) {
+    if (!out.some(o => o.p === c.p)) out.push(c);
+    if (out.length === 3) break;
+  }
+  return out;
+}
+function learnWord(w, p) {
+  if (!w || w.length < 3) return;
+  state.learned[w] = p.id;
+  save('learned', state.learned);
 }
 
 /* ---------------------------------------------------------------- Wissen */
@@ -466,10 +524,10 @@ async function answer(transcripts) {
     return speak('Ich habe nichts gehört. Drück auf den grünen Knopf und sprich dann.');
   }
   // Die erste Alternative nehmen, in der ein Pokémon vorkommt.
-  let text = transcripts[0], found = [];
+  let text = transcripts[0], found = [], match = null;
   for (const t of transcripts) {
     const f = findPokemon(t);
-    if (f.length) { text = t; found = f; break; }
+    if (f.length) { text = t; found = f; match = findPokemon.details[0]; break; }
   }
   $('#heard').textContent = `„${text}“`;
   const lower = text.toLowerCase();
@@ -489,11 +547,25 @@ async function answer(transcripts) {
   }
   const p = found[0] || (intent !== 'entry' ? state.last : null);
   if (!p) {
+    const sug = suggestPokemon(transcripts);
+    if (sug.length) {
+      showSuggestions(sug, intent);
+      return speak('Meintest du eins von diesen Pokémon? Tipp drauf!');
+    }
     return speak('Das habe ich leider nicht verstanden. Sag mir einfach den Namen von einem Pokémon!');
   }
+  // Bei unsicherer Erkennung andere Möglichkeiten zum Antippen anbieten
+  let alts = [];
+  if (match && match.s < 0.9) {
+    alts = suggestPokemon([match.w]).filter(x => x.p !== p).slice(0, 2).map(x => ({ ...x, w: match.w }));
+  }
+  return reply(p, intent, found, alts);
+}
+
+async function reply(p, intent, found = [p], alts = []) {
   if (p !== state.last) state.flavorIdx = 0;
   state.last = p;
-  showEntry(p);
+  showEntry(p, alts, intent);
 
   switch (intent) {
     case 'cry': return playCry(p);
@@ -535,7 +607,7 @@ function evoRow(p) {
   ).join('')}</div>`;
 }
 
-function showEntry(p) {
+function showEntry(p, alts = [], intent = 'entry') {
   switchView('ask');
   const isFav = state.favs.includes(p.id);
   const node = el(`
@@ -545,6 +617,8 @@ function showEntry(p) {
         <span class="entry-name">${p.n}</span>
         <button class="star${isFav ? ' on' : ''}" aria-label="Zur Sammlung">⭐</button>
       </div>
+      ${alts.length ? `<div class="alts"><span>Falsch? Tipp:</span>${alts.map(a =>
+        `<button class="alt" data-id="${a.p.id}" data-w="${a.w}"><img src="${SPRITE_BIG(a.p.id)}" alt="${a.p.n}"></button>`).join('')}</div>` : ''}
       <img class="entry-img" src="${SPRITE_BIG(p.id)}" alt="${p.n}">
       ${p.leg ? `<span class="badge-leg">${p.leg === 1 ? '✨ Legendär' : '✨ Mysteriös'}</span>` : ''}
       <div class="entry-genus">${p.g || ''}</div>
@@ -563,6 +637,11 @@ function showEntry(p) {
     </div>`);
   node.querySelector('.star').onclick = e => { toggleFav(p); e.currentTarget.classList.toggle('on', state.favs.includes(p.id)); };
   node.querySelector('.entry-img').onclick = () => playCry(p);
+  node.querySelectorAll('.alt').forEach(b => b.onclick = () => {
+    const x = state.byId.get(+b.dataset.id);
+    learnWord(b.dataset.w, x);
+    reply(x, intent, [x]);
+  });
   node.querySelectorAll('[data-act]').forEach(b => b.onclick = () => {
     const a = b.dataset.act;
     if (a === 'read') sfx.dex().then(() => speak(entryText(p, state.flavorIdx++)));
@@ -581,6 +660,22 @@ function showEntry(p) {
   const answerBox = $('#answer');
   answerBox.replaceChildren(node);
   $('#screen').scrollTop = 0;
+}
+
+function showSuggestions(sug, intent) {
+  switchView('ask');
+  const node = el(`
+    <div class="entry">
+      <div class="entry-name">Meintest du …?</div>
+      <div class="suggest">${sug.map(x =>
+        `<button class="sug" data-id="${x.p.id}" data-w="${x.w}"><img src="${SPRITE_BIG(x.p.id)}" alt="">${x.p.n}</button>`).join('')}</div>
+    </div>`);
+  node.querySelectorAll('.sug').forEach(b => b.onclick = () => {
+    const x = state.byId.get(+b.dataset.id);
+    learnWord(b.dataset.w, x);   // Beim nächsten Mal wird das Wort gleich richtig erkannt
+    reply(x, intent, [x]);
+  });
+  $('#answer').replaceChildren(node);
 }
 
 function showCompare(a, b) {
@@ -784,6 +879,7 @@ function initSettings() {
 async function init() {
   state.settings = { ...state.settings, ...load('settings', {}) };
   state.favs = load('favs', []);
+  state.learned = load('learned', {});
   const res = await fetch('data/pokedex-de.json');
   state.data = await res.json();
   for (const p of state.data.pokemon) state.byId.set(p.id, p);
@@ -833,7 +929,7 @@ async function init() {
 
 // Für Tests in Node exportieren
 if (typeof module !== 'undefined') {
-  module.exports = { norm, koeln, lev, findPokemon, detectIntent, state, buildIndex, weaknessText, evolutionText, heightText, weightText, battleText, entryText };
+  module.exports = { soundNorm, suggestPokemon, learnWord, norm, koeln, lev, findPokemon, detectIntent, state, buildIndex, weaknessText, evolutionText, heightText, weightText, battleText, entryText };
 } else {
   init();
 }
