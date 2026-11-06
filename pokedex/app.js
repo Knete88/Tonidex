@@ -156,49 +156,79 @@ function listen(button) {
     }
     // Nochmal tippen während des Zuhörens = aufhören
     if (button.classList.contains('listening') && rec) { try { rec.stop(); } catch { /* egal */ } return resolve(null); }
-    stopSpeaking();
+
+    // Ton-Ausgabe anhalten: Auf dem iPhone beendet laufender Ton das Zuhören sofort.
+    if ('speechSynthesis' in window && (speechSynthesis.speaking || speechSynthesis.pending)) stopSpeaking();
+    if (audioCtx && audioCtx.state === 'running' && IS_IOS) { try { audioCtx.suspend(); } catch { /* egal */ } }
     if (rec) { try { rec.abort(); } catch { /* egal */ } }
-    rec = new Recognition();
-    rec.lang = 'de-DE';
-    rec.interimResults = false;
-    rec.maxAlternatives = 5;
-    rec.continuous = false;
+
+    const log = [];
     let results = [];
     let failed = null;
     let done = false;
     let safety = null;
+    let attempt = 0;
+    let t0 = 0;
+
     const finish = () => {
       if (done) return;
+      // Sofort wieder beendet, ohne etwas zu hören? Dann einmal neu versuchen.
+      if (!results.length && !failed && attempt < 2 && Date.now() - t0 < 1500) {
+        log.push('neuer Versuch');
+        return setTimeout(startOnce, 250);
+      }
       done = true;
       clearTimeout(safety);
       button.classList.remove('listening');
       $('#lens').classList.remove('listening');
-      if (failed) {
-        parentHint(micErrorHelp(failed));
+      if (audioCtx && IS_IOS) { try { audioCtx.resume(); } catch { /* egal */ } }
+      if (failed && failed !== 'no-speech') {
+        parentHint(micErrorHelp(failed) + ` [${log.join(' › ')}]`);
         if (failed === 'not-allowed' || failed === 'service-not-allowed') speak('Ich darf das Mikrofon nicht benutzen. Bitte frag einen Erwachsenen.');
-        else if (failed !== 'no-speech' && failed !== 'aborted') speak('Hoppla, das Zuhören hat nicht geklappt.');
-        return resolve(failed === 'no-speech' ? [] : null);
+        else if (failed !== 'aborted') speak('Hoppla, das Zuhören hat nicht geklappt.');
+        return resolve(null);
+      }
+      if (!results.length && Date.now() - t0 < 2500) {
+        parentHint('Für Eltern: Das Zuhören wurde sofort wieder beendet. Bitte prüfen: Einstellungen → Allgemein → Tastatur → „Diktierfunktion“ an? Läuft gerade Musik oder ein Video? '
+          + `[${log.join(' › ')}]`);
       }
       sfx.stop();
       resolve(results);
     };
-    rec.onresult = e => {
-      const r = e.results[e.results.length - 1];
-      results = Array.from(r, a => a.transcript);
+
+    const startOnce = () => {
+      attempt++;
+      t0 = Date.now();
+      rec = new Recognition();
+      rec.lang = 'de-DE';
+      rec.interimResults = false;
+      rec.maxAlternatives = 5;
+      rec.continuous = false;
+      rec.onstart = () => log.push('start');
+      rec.onaudiostart = () => log.push('audio');
+      rec.onspeechstart = () => log.push('sprache');
+      rec.onresult = e => {
+        log.push('ergebnis');
+        const r = e.results[e.results.length - 1];
+        results = Array.from(r, a => a.transcript);
+      };
+      rec.onerror = e => { log.push('fehler:' + e.error); failed = e.error || 'unbekannt'; finish(); };
+      rec.onend = () => { log.push('ende'); finish(); };
+      try {
+        rec.start();
+      } catch (err) {
+        log.push('startfehler:' + ((err && err.name) || '?'));
+        failed = (err && err.name) || 'start';
+        finish();
+      }
     };
-    rec.onerror = e => { failed = e.error || 'unbekannt'; finish(); };
-    rec.onend = finish;
+
     button.classList.add('listening');
     $('#lens').classList.add('listening');
     // WICHTIG: direkt im Tipp starten – iPhones blockieren das Mikrofon sonst.
-    try {
-      rec.start();
-    } catch (err) {
-      failed = (err && err.name) || 'start';
-      return finish();
-    }
+    startOnce();
     // Sicherheitsnetz, falls der Browser nie "fertig" meldet
-    safety = setTimeout(() => { try { rec.stop(); } catch { /* egal */ } setTimeout(finish, 1500); }, 12000);
+    safety = setTimeout(() => { try { rec.stop(); } catch { /* egal */ } setTimeout(() => { attempt = 9; finish(); }, 1500); }, 12000);
   });
 }
 
@@ -768,16 +798,14 @@ async function init() {
   renderAll(0);
   renderFavs();
 
-  // iOS gibt Ton erst nach der ersten Berührung frei.
-  document.addEventListener('pointerdown', () => {
+  // Einschalt-Bildschirm: Der erste Tipp gibt Ton und Stimme frei (nötig auf iPhone/iPad),
+  // getrennt vom Mikrofon-Knopf, damit sich beides nicht in die Quere kommt.
+  $('#boot').onclick = () => {
     ctx();
-    if ('speechSynthesis' in window && !state.unlocked) {
-      state.unlocked = true;
-      const u = new SpeechSynthesisUtterance(' ');
-      u.volume = 0;
-      speechSynthesis.speak(u);
-    }
-  }, { once: true, capture: true });
+    $('#boot').classList.add('off');
+    sfx.dex().then(() => speak('Hallo! Ich bin dein Pokédex. Drück auf den grünen Knopf und frag mich etwas!'));
+    setTimeout(() => $('#boot').remove(), 600);
+  };
 
   $('#toast').onclick = () => $('#toast').classList.remove('show');
   $('#btnMic').onclick = async () => {

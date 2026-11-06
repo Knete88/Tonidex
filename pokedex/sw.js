@@ -1,5 +1,5 @@
 // Offline-Unterstützung: App-Dateien vorab speichern, Bilder und Rufe beim ersten Abruf merken.
-const VERSION = 'pokedex-v2';
+const VERSION = 'pokedex-v3';
 const APP = ['./', 'index.html', 'style.css', 'app.js', 'data/pokedex-de.json', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-180.png'];
 
