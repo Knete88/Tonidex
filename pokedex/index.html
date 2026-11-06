@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#d7262e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Pokédex">
+  <title>Mein Pokédex</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="dex">
+    <!-- Kopfteil mit der großen blauen Linse -->
+    <header class="dex-top">
+      <div class="lens" id="lens"><div class="lens-shine"></div></div>
+      <div class="leds"><span class="led red"></span><span class="led yellow"></span><span class="led green"></span></div>
+      <button class="gear" id="btnSettings" aria-label="Einstellungen für Eltern">⚙︎</button>
+    </header>
+
+    <main class="dex-body">
+      <!-- ===== Ansicht: Fragen ===== -->
+      <section class="view active" id="view-ask">
+        <div class="screen" id="screen">
+          <div class="screen-inner" id="answer">
+            <div class="welcome">
+              <div class="big-emoji">🎤</div>
+              <p>Drück auf den Knopf<br>und frag mich etwas!</p>
+            </div>
+          </div>
+        </div>
+        <div class="heard" id="heard" aria-live="polite"></div>
+        <div class="controls">
+          <button class="mic" id="btnMic" aria-label="Frage stellen">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V22h2v-3.08A7 7 0 0 0 19 12h-2Z"/></svg>
+          </button>
+        </div>
+      </section>
+
+      <!-- ===== Ansicht: Alle Pokémon ===== -->
+      <section class="view" id="view-all">
+        <div class="gen-chips" id="genChips"></div>
+        <div class="grid" id="allGrid"></div>
+      </section>
+
+      <!-- ===== Ansicht: Quiz ===== -->
+      <section class="view" id="view-quiz">
+        <div class="quiz-top">
+          <div class="score" id="quizScore">⭐ 0</div>
+          <button class="pill" id="quizMode">🖼️ Leicht</button>
+        </div>
+        <div class="screen quiz-screen">
+          <img id="quizImg" class="silhouette" alt="Wer ist das Pokémon?">
+          <div class="quiz-q" id="quizQ">Wer ist das Pokémon?</div>
+        </div>
+        <div class="quiz-choices" id="quizChoices"></div>
+        <div class="controls quiz-controls">
+          <button class="mic small" id="quizMic" aria-label="Namen sagen">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V22h2v-3.08A7 7 0 0 0 19 12h-2Z"/></svg>
+          </button>
+          <button class="next" id="quizNext" aria-label="Nächstes Pokémon">➜</button>
+        </div>
+      </section>
+
+      <!-- ===== Ansicht: Sammlung ===== -->
+      <section class="view" id="view-favs">
+        <h2 class="fav-title">⭐ Meine Lieblings-Pokémon</h2>
+        <div class="grid" id="favGrid"></div>
+        <div class="empty" id="favEmpty">
+          <div class="big-emoji">⭐</div>
+          <p>Noch leer!<br>Drück beim Pokémon auf den Stern.</p>
+        </div>
+      </section>
+    </main>
+
+    <!-- Große Navigations-Knöpfe -->
+    <nav class="dex-nav">
+      <button data-view="ask" class="active" aria-label="Fragen">🎤</button>
+      <button data-view="all" aria-label="Alle Pokémon">📖</button>
+      <button data-view="quiz" aria-label="Quiz">❓</button>
+      <button data-view="favs" aria-label="Sammlung">⭐</button>
+    </nav>
+  </div>
+
+  <!-- Einstellungen (für Eltern) -->
+  <dialog id="settings">
+    <form method="dialog" class="settings">
+      <h2>Einstellungen</h2>
+      <label>Stimme
+        <select id="setVoice"></select>
+      </label>
+      <label>Stimm-Art
+        <select id="setPreset">
+          <option value="robot">Pokédex (tiefer, wie ein Roboter)</option>
+          <option value="normal">Normal</option>
+          <option value="slow">Langsam (für kleine Zuhörer)</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" id="setBeeps"> Piep-Geräusche</label>
+      <label>Pokémon im Quiz
+        <select id="setQuizGen">
+          <option value="1">Nur die ersten 151 (1. Generation)</option>
+          <option value="2">1. und 2. Generation</option>
+          <option value="9">Alle Pokémon</option>
+        </select>
+      </label>
+      <label>Wie groß ist das Kind? (für Vergleiche)
+        <select id="setKidHeight">
+          <option value="100">ca. 1,00 m</option>
+          <option value="110">ca. 1,10 m</option>
+          <option value="120">ca. 1,20 m</option>
+          <option value="130">ca. 1,30 m</option>
+        </select>
+      </label>
+      <div class="settings-row">
+        <button type="button" id="setTest">🔊 Stimme testen</button>
+        <button value="close" class="primary">Fertig</button>
+      </div>
+      <p class="hint" id="supportHint"></p>
+      <p class="hint">Daten: PokéAPI. Private Fan-App, nicht offiziell.<br>Pokémon © Nintendo / Creatures / GAME FREAK.</p>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
