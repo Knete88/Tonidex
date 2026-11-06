@@ -118,15 +118,45 @@ function stopSpeaking() {
 /* ---------------------------------------------------------------- Spracherkennung */
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null;
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const IS_STANDALONE = window.navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+
+// Hinweis für Eltern unten im Bild (bleibt einige Sekunden stehen)
+function parentHint(text) {
+  const t = $('#toast');
+  t.textContent = text;
+  t.classList.add('show');
+  clearTimeout(parentHint.timer);
+  parentHint.timer = setTimeout(() => t.classList.remove('show'), 15000);
+}
+
+function micErrorHelp(code) {
+  if (code === 'service-not-allowed' && IS_IOS) {
+    return IS_STANDALONE
+      ? 'Für Eltern: Das iPhone erlaubt die Spracherkennung hier nicht. 1) Einstellungen → Allgemein → Tastatur → „Diktierfunktion“ einschalten. 2) Falls es dann immer noch nicht geht: den Pokédex direkt in Safari öffnen statt über das App-Symbol.'
+      : 'Für Eltern: Bitte Einstellungen → Allgemein → Tastatur → „Diktierfunktion“ einschalten (und ggf. Siri). Dann die Seite neu laden.';
+  }
+  if (code === 'not-allowed' || code === 'service-not-allowed') {
+    return IS_IOS
+      ? 'Für Eltern: Mikrofon ist blockiert. In Safari links in der Adressleiste auf „aA“ → Website-Einstellungen → Mikrofon → „Erlauben“. Außerdem: Einstellungen → Datenschutz → Spracherkennung → Safari erlauben. Dann Seite neu laden.'
+      : 'Für Eltern: Mikrofon ist blockiert. Auf das Schloss-Symbol neben der Adresse tippen → Berechtigungen → Mikrofon erlauben. Dann Seite neu laden.';
+  }
+  if (code === 'audio-capture') return 'Für Eltern: Es wurde kein Mikrofon gefunden oder es wird gerade von einer anderen App benutzt.';
+  if (code === 'network') return 'Für Eltern: Die Spracherkennung braucht eine Internetverbindung.';
+  return `Für Eltern: Spracherkennung meldet „${code}“.`;
+}
+
+// Hört einmal zu. Ergebnis: Liste möglicher Sätze, [] = nichts gehört, null = abgebrochen/Fehler.
 function listen(button) {
   return new Promise(resolve => {
     if (!Recognition) {
-      speak('Dieses Gerät kann leider nicht zuhören. Probier es mit Google Chrome oder Safari.');
-      return resolve([]);
+      parentHint('Für Eltern: Dieser Browser kann nicht zuhören. Bitte Safari (iPhone/iPad) oder Chrome (Android) verwenden.');
+      speak('Dieses Gerät kann leider nicht zuhören.');
+      return resolve(null);
     }
-    stopSpeaking();
     // Nochmal tippen während des Zuhörens = aufhören
     if (button.classList.contains('listening') && rec) { try { rec.stop(); } catch { /* egal */ } return resolve(null); }
+    stopSpeaking();
     if (rec) { try { rec.abort(); } catch { /* egal */ } }
     rec = new Recognition();
     rec.lang = 'de-DE';
@@ -134,34 +164,41 @@ function listen(button) {
     rec.maxAlternatives = 5;
     rec.continuous = false;
     let results = [];
+    let failed = null;
     let done = false;
+    let safety = null;
     const finish = () => {
       if (done) return;
       done = true;
       clearTimeout(safety);
       button.classList.remove('listening');
       $('#lens').classList.remove('listening');
+      if (failed) {
+        parentHint(micErrorHelp(failed));
+        if (failed === 'not-allowed' || failed === 'service-not-allowed') speak('Ich darf das Mikrofon nicht benutzen. Bitte frag einen Erwachsenen.');
+        else if (failed !== 'no-speech' && failed !== 'aborted') speak('Hoppla, das Zuhören hat nicht geklappt.');
+        return resolve(failed === 'no-speech' ? [] : null);
+      }
       sfx.stop();
       resolve(results);
     };
     rec.onresult = e => {
-      const r = e.results[0];
+      const r = e.results[e.results.length - 1];
       results = Array.from(r, a => a.transcript);
     };
-    rec.onerror = e => {
-      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
-        speak('Ich darf das Mikrofon nicht benutzen. Bitte frag einen Erwachsenen.');
-      }
-      finish();
-    };
+    rec.onerror = e => { failed = e.error || 'unbekannt'; finish(); };
     rec.onend = finish;
-    // Sicherheitsnetz, falls der Browser nie "fertig" meldet
-    const safety = setTimeout(() => { try { rec.abort(); } catch { /* egal */ } finish(); }, 12000);
     button.classList.add('listening');
     $('#lens').classList.add('listening');
-    sfx.start().then(() => {
-      try { rec.start(); } catch { finish(); }
-    });
+    // WICHTIG: direkt im Tipp starten – iPhones blockieren das Mikrofon sonst.
+    try {
+      rec.start();
+    } catch (err) {
+      failed = (err && err.name) || 'start';
+      return finish();
+    }
+    // Sicherheitsnetz, falls der Browser nie "fertig" meldet
+    safety = setTimeout(() => { try { rec.stop(); } catch { /* egal */ } setTimeout(finish, 1500); }, 12000);
   });
 }
 
@@ -708,6 +745,7 @@ function initSettings() {
   $('#setTest').onclick = () => { store(); sfx.dex().then(() => speak(entryText(state.byId.get(25)))); };
   const hints = [];
   if (!Recognition) hints.push('⚠️ Dieser Browser unterstützt keine Spracherkennung. Bitte Chrome (Android) oder Safari (iPhone/iPad) verwenden.');
+  if (IS_IOS) hints.push('iPhone/iPad: Für die Spracheingabe muss unter Einstellungen → Allgemein → Tastatur die „Diktierfunktion“ eingeschaltet sein.');
   if (!('speechSynthesis' in window)) hints.push('⚠️ Dieser Browser kann nicht vorlesen.');
   $('#supportHint').textContent = hints.join(' ');
 }
@@ -741,6 +779,7 @@ async function init() {
     }
   }, { once: true, capture: true });
 
+  $('#toast').onclick = () => $('#toast').classList.remove('show');
   $('#btnMic').onclick = async () => {
     const said = await listen($('#btnMic'));
     if (said) answer(said);
