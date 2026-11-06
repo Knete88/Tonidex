@@ -258,3 +258,19 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
   -webkit-user-select: text; user-select: text;
 }
 .toast.show { transform: none; opacity: 1; }
+
+/* ---------- Einschalt-Bildschirm ---------- */
+.boot {
+  position: fixed; inset: 0; z-index: 30;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px;
+  background: radial-gradient(circle at 50% 40%, var(--red-light), var(--red) 55%, var(--red-dark));
+  color: #fff; transition: opacity .5s;
+}
+.boot.off { opacity: 0; pointer-events: none; }
+.boot-lens {
+  width: 160px; height: 160px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #9fdcff, var(--blue) 45%, #0b5ea8);
+  border: 10px solid #fff; box-shadow: 0 0 0 5px #222, 0 10px 20px rgba(0,0,0,.35);
+  animation: talk 1.2s infinite alternate;
+}
+.boot-text { font-size: 34px; font-weight: 900; text-align: center; text-shadow: 0 3px 3px rgba(0,0,0,.35); }
