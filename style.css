@@ -274,3 +274,15 @@ dialog::backdrop { background: rgba(0,0,0,.5); }
   animation: talk 1.2s infinite alternate;
 }
 .boot-text { font-size: 34px; font-weight: 900; text-align: center; text-shadow: 0 3px 3px rgba(0,0,0,.35); }
+
+/* ---------- Meintest du …? ---------- */
+.suggest { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; width: 100%; margin-top: 10px; }
+.sug {
+  background: #fff; border: 4px solid #222; border-radius: 20px; padding: 8px 4px;
+  display: flex; flex-direction: column; align-items: center; font-weight: bold; font-size: 14px;
+  box-shadow: 0 5px 0 #222;
+}
+.sug img { width: 100%; max-width: 150px; aspect-ratio: 1; object-fit: contain; }
+.alts { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: bold; color: #557; }
+.alt { background: #fff; border: 2px solid #999; border-radius: 14px; padding: 2px; }
+.alt img { width: 52px; height: 52px; object-fit: contain; display: block; }
