@@ -17,7 +17,7 @@ const GEN_RANGES = [[1, 151], [152, 251], [252, 386], [387, 493], [494, 649], [6
 const $ = s => document.querySelector(s);
 const state = {
   data: null, byId: new Map(), keys: [], last: null, flavorIdx: 0,
-  settings: { voice: '', preset: 'robot', beeps: true, quizGen: '1', kidHeight: '110' },
+  settings: { voice: '', preset: 'natural', beeps: true, quizGen: '1', kidHeight: '110' },
   favs: [],
   learned: {},
 };
@@ -65,21 +65,41 @@ const sfx = {
 };
 
 /* ---------------------------------------------------------------- Sprachausgabe */
-const PRESETS = { robot: { pitch: 0.75, rate: 1.0 }, normal: { pitch: 1, rate: 1 }, slow: { pitch: 0.95, rate: 0.82 } };
+const PRESETS = {
+  natural: { pitch: 1.0, rate: 0.95, pause: 220 },
+  lively: { pitch: 1.12, rate: 1.0, pause: 180 },
+  slow: { pitch: 1.0, rate: 0.82, pause: 320 },
+  robot: { pitch: 0.75, rate: 1.0, pause: 120 },
+};
+// Bewertet, wie natürlich eine Stimme vermutlich klingt (höher = besser)
+function voiceQuality(v) {
+  const n = v.name.toLowerCase();
+  let q = 0;
+  if (/premium|erweitert|enhanced|neural|natural|wavenet/.test(n)) q += 10;
+  if (/google/.test(n)) q += 4;                    // Android: Google-Stimmen klingen ordentlich
+  if (/anna|petra|helena|markus|yannick|martin|vicki|katja|conrad|amala|seraphina/.test(n)) q += 2;
+  if (/eloquence|grandma|grandpa|oma|opa|rocko|shelley|flo|reed|sandy|eddy/.test(n)) q -= 8; // Spaß-/Roboterstimmen
+  if (v.lang === 'de-DE' || v.lang === 'de_DE') q += 1;
+  return q;
+}
 let voices = [];
 function loadVoices() {
   if (!('speechSynthesis' in window)) return;
-  voices = speechSynthesis.getVoices().filter(v => v.lang && v.lang.toLowerCase().startsWith('de'));
+  voices = speechSynthesis.getVoices()
+    .filter(v => v.lang && v.lang.toLowerCase().replace('_', '-').startsWith('de'))
+    .sort((a, b) => voiceQuality(b) - voiceQuality(a));
   const sel = $('#setVoice');
   sel.innerHTML = '';
-  if (!voices.length) sel.append(new Option('Standard-Stimme', ''));
-  for (const v of voices) sel.append(new Option(`${v.name}${v.localService ? '' : ' (online)'}`, v.voiceURI));
-  sel.value = state.settings.voice;
+  sel.append(new Option('Automatisch (beste Stimme)', ''));
+  for (const v of voices) sel.append(new Option(`${voiceQuality(v) >= 10 ? '⭐ ' : ''}${v.name}`, v.voiceURI));
+  sel.value = voices.some(v => v.voiceURI === state.settings.voice) ? state.settings.voice : '';
+  const best = voices[0];
+  const hint = $('#voiceHint');
+  if (hint) hint.style.display = best && voiceQuality(best) >= 10 ? 'none' : '';
 }
 function pickVoice() {
   return voices.find(v => v.voiceURI === state.settings.voice)
-    || voices.find(v => v.lang === 'de-DE' && v.localService)
-    || voices.find(v => v.lang === 'de-DE') || voices[0] || null;
+    || voices[0] || null;
 }
 function speakable(text) {
   return text.replace(/♀/g, ' weiblich').replace(/♂/g, ' männlich').replace(/Pokémon/g, 'Pokemon');
@@ -91,7 +111,7 @@ function speak(text) {
   const token = ++speakToken;
   // In kurze Sätze zerlegen: lange Texte brechen in manchen Browsern mittendrin ab.
   const parts = speakable(text).match(/[^.!?]+[.!?]*/g) || [text];
-  const p = PRESETS[state.settings.preset] || PRESETS.robot;
+  const p = PRESETS[state.settings.preset] || PRESETS.natural;
   const voice = pickVoice();
   const lens = $('#lens');
   return new Promise(resolve => {
@@ -103,7 +123,7 @@ function speak(text) {
       u.lang = 'de-DE'; u.pitch = p.pitch; u.rate = p.rate;
       if (voice) u.voice = voice;
       u.onstart = () => lens.classList.add('talking');
-      u.onend = next;
+      u.onend = () => setTimeout(next, p.pause);   // kleine Atempause zwischen Sätzen
       u.onerror = next;
       speechSynthesis.speak(u);
     };
@@ -470,12 +490,14 @@ function weaknessText(p) {
   if (super4.length) t += ` ${listText(super4.map(x => typeName(x.a)))} ist sogar besonders stark, viermal so stark!`;
   return t;
 }
+const pickOne = arr => arr[Math.floor(Math.random() * arr.length)];
 function entryText(p, idx = 0) {
-  const parts = [`${p.n}.`];
-  if (p.g) parts.push(`Das ${p.g}.`);
-  parts.push(`Typ ${typesText(p)}.`);
-  if (p.leg === 1) parts.push('Ein legendäres Pokémon!');
-  if (p.leg === 2) parts.push('Ein sehr geheimnisvolles, mysteriöses Pokémon!');
+  const parts = [];
+  const intro = pickOne(['Das ist', 'Schau mal, das ist', 'Oh, das ist', 'Hier ist']);
+  parts.push(p.g ? `${intro} ${p.n}, das ${p.g}!` : `${intro} ${p.n}!`);
+  parts.push(`${p.n} ist ein Pokémon vom Typ ${typesText(p)}.`);
+  if (p.leg === 1) parts.push('Und weißt du was? Es ist ein legendäres Pokémon!');
+  if (p.leg === 2) parts.push('Es ist ein ganz geheimnisvolles, mysteriöses Pokémon!');
   if (p.f.length) parts.push(p.f[idx % p.f.length]);
   else parts.push(`Über ${p.n} weiß man noch nicht so viel.`);
   return parts.join(' ');
@@ -878,6 +900,8 @@ function initSettings() {
 /* ---------------------------------------------------------------- Start */
 async function init() {
   state.settings = { ...state.settings, ...load('settings', {}) };
+  // Umstieg von früheren Versionen: Roboter-Stimme war Standard, jetzt natürliche Stimme
+  if (!state.settings.v2) { state.settings.preset = 'natural'; state.settings.voice = ''; state.settings.v2 = true; save('settings', state.settings); }
   state.favs = load('favs', []);
   state.learned = load('learned', {});
   const res = await fetch('data/pokedex-de.json');
